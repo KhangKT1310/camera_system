@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main, feat/* ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  build-native:
+    name: Native Build & Test (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential clang
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_MOCK=ON -DENABLE_TESTS=ON -DENABLE_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: |
+          cmake --build build --parallel $(nproc)
+
+      - name: Run Tests
+        run: |
+          ctest --test-dir build --output-on-failure
+
+  build-cross-arm64:
+    name: Cross-compile Build (ARM64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Cross Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Configure CMake for ARM64
+        run: |
+          cmake -B build-arm64 -DCMAKE_TOOLCHAIN_FILE=device-agent/cmake/toolchains/aarch64-linux-gnu.cmake -DENABLE_MOCK=ON
+
+      - name: Build ARM64 Binaries
+        run: |
+          cmake --build build-arm64 --parallel $(nproc)

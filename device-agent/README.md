@@ -14,7 +14,7 @@ The device agent hosts portable edge logic for capture orchestration, WebRTC pub
 
 * Cloud-only business logic.
 * Web client UI code.
-* Direct vendor SDK calls outside `platform/`.
+* Proprietary vendor SDK binaries, NDA headers, or closed-source libraries. Vendor SDK integrations belong out-of-tree.
 
 ## Security and Compliance Notes
 
