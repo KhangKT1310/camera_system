@@ -19,7 +19,7 @@ The platform layer isolates OS, board, SoC, and vendor SDK integration behind st
 
 ## Security and Compliance Notes
 
-This is the only place where vendor SDK calls are allowed. Each platform adapter must document available secure-storage, crypto, debug-control, and update primitives so the project can assess QCVN 11:2026/BCA coverage per target.
+This directory contains open-source platform implementations (`mock`, `linux_v4l2`, `common`) and integration notes for vendor targets. Proprietary vendor SDK bindings must be developed out-of-tree or linked dynamically via HAL C vtables to maintain MIT licensing compliance. Each platform target must document available secure-storage, crypto, debug-control, and update primitives.
 
 ## Cross-Platform Notes
 

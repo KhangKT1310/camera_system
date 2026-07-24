@@ -26,11 +26,11 @@ Recorded segments are indexed separately from live transport, playback requests 
 
 ## Cross-Platform Design Rules
 
-* Core code must remain portable.
-* Vendor SDK calls are allowed only under `device-agent/platform/<vendor>/`.
-* Core modules must depend on abstract interfaces for capture, encoding, storage, network, crypto, secure storage, OTA, and recovery.
-* HAL contracts are defined under `device-agent/core/hal/` and must be stabilized before WebRTC or compatibility adapter implementation.
-* Platform capabilities and limitations must be documented alongside each platform adapter.
+* Core code must remain portable and hardware-agnostic.
+* Main repository is 100% open-source (MIT) and contains NO proprietary vendor SDK binaries, NDA headers, or closed-source libraries.
+* Vendor integrations are maintained out-of-tree or as standalone HAL plugins linking via public C HAL vtables (`include/hal/*.h`).
+* `device-agent/platform/` contains open-source reference implementations (`mock`, `linux_v4l2`, `common`) and vendor integration documentation.
+* Platform capabilities and limitations must be documented alongside each platform target.
 
 ## Security-First Principles
 
