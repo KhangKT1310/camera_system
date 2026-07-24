@@ -29,6 +29,7 @@ Recorded segments are indexed separately from live transport, playback requests 
 * Core code must remain portable.
 * Vendor SDK calls are allowed only under `device-agent/platform/<vendor>/`.
 * Core modules must depend on abstract interfaces for capture, encoding, storage, network, crypto, secure storage, OTA, and recovery.
+* HAL contracts are defined under `device-agent/core/hal/` and must be stabilized before WebRTC or compatibility adapter implementation.
 * Platform capabilities and limitations must be documented alongside each platform adapter.
 
 ## Security-First Principles

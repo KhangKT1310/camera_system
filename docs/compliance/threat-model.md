@@ -51,9 +51,11 @@
 * How device provisioning will bind identity, ownership, and certificate lifecycle.
 * Which retention and deletion guarantees apply per deployment and storage backend.
 * What Vietnam data-locality options are required per customer or service tier.
+* Which HAL capabilities are mandatory for the first production-qualified device profile.
 
 ## Review History
 
 | Date | Change | Owner | Status |
 | --- | --- | --- | --- |
 | 2026-06-17 | Initial template created for architecture and compliance planning. | Codex | Draft |
+| 2026-06-17 | Added HAL-boundary review item to track platform capability and security gaps. | Codex | Draft |

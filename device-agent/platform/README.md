@@ -9,6 +9,7 @@ The platform layer isolates OS, board, SoC, and vendor SDK integration behind st
 * Hardware and OS-specific implementations of capture, codec, storage, crypto, secure storage, reboot, and provisioning interfaces.
 * Capability notes for each supported target.
 * Platform-specific compliance constraints and gaps.
+* Implementations of the contracts defined in `device-agent/core/hal/`.
 
 ## What Must Not Be Placed Here
 

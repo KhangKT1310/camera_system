@@ -9,6 +9,7 @@ This directory contains the portable core of the device agent: media orchestrati
 * Interfaces and contracts shared across platforms.
 * Business logic for live, playback, recording, and update orchestration.
 * Validation, policy, and control-plane logic that must behave consistently on every target.
+* HAL definitions under `hal/` that describe how core code consumes platform services.
 
 ## What Must Not Be Placed Here
 
