@@ -12,7 +12,7 @@ The Camera System framework adheres to secure-by-default principles:
 
 If you discover a security vulnerability within this framework, please report it privately:
 
-- **Email**: security@example.com (or open a private security advisory on GitHub)
+- **Email**: khangkieutrong@gmail.com (or open a private security advisory on GitHub)
 - **Response Window**: We will acknowledge reports within 48 hours and aim to provide a mitigation plan within 14 days.
 
 Do not publicly disclose vulnerabilities until a patch or advisory has been published.
