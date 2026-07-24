@@ -84,7 +84,21 @@ Every commit must follow these rules:
 
 8. Do not mark a commit as compliance-complete unless evidence exists.
    Use `Draft`, `TODO`, or `Not Started` where evidence is incomplete.
-```
+
+## Pull Request Rules
+
+Every PR must follow these rules:
+
+1. Use the PR template.
+2. Keep PRs small and reviewable.
+3. Do not mix unrelated changes.
+4. Do not bypass the compliance checklist.
+5. Any protocol/interface change must update `docs/compliance/interface-inventory.md`.
+6. Any security or user-data change must update compliance evidence.
+7. Any HAL contract change must update documentation under `device-agent/core/hal/`.
+8. Any platform-specific implementation must document platform limitations.
+9. A PR must not claim QCVN compliance unless supporting evidence is present.
+10. PRs affecting authentication, encryption, OTA, secure storage, debug interfaces, user data, playback, or protocol exposure require human security/compliance review.
 
 ## Credential and Authentication Rules
 
