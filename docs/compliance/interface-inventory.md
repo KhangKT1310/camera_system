@@ -9,6 +9,7 @@ Every new interface or protocol must be added here before implementation is cons
 | Admin HTTP API | HTTPS | Enabled | Administrative control and device or tenant management. | Yes | Yes | Controlled | `cloud/auth-service` / `web/admin` | Draft |
 | Playback API | HTTPS | Enabled | Recording search, authorization, and playback session creation. | Yes | Yes | Controlled | `cloud/playback-service` | Draft |
 | OTA API | HTTPS | Enabled | Signed firmware or software manifest retrieval and update coordination. | Yes | Yes | Controlled | `cloud/ota-service` | Draft |
+| Core-platform HAL boundary | Internal logical interface | Enabled | Portable contract surface between `device-agent/core` and `device-agent/platform/*`. | N/A | Integrity required for implementations | No | `device-agent/core/hal` | Draft |
 | RTSP adapter | RTSP / RTSPS | Disabled by default | Legacy NVR or VMS compatibility path. | Yes | Yes where supported | No by default | `device-agent/adapters/rtsp` | Draft |
 | RTMP/RTMPS adapter | RTMP / RTMPS | Disabled by default | Optional ingest or push compatibility path. | Yes | Yes for RTMPS | No by default | `device-agent/adapters/rtmp` | Draft |
 | ONVIF adapter | ONVIF over HTTP(S) / SOAP | Disabled by default | Discovery, device management, PTZ, and event compatibility. | Yes | Yes where supported | No by default | `device-agent/adapters/onvif` | Draft |
