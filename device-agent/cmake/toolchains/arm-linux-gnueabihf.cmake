@@ -1,9 +1,23 @@
 set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR arm)
 
-# Specify target cross compilers
-set(CMAKE_C_COMPILER arm-linux-gnueabihf-gcc)
-set(CMAKE_CXX_COMPILER arm-linux-gnueabihf-g++)
+# Allow overriding compiler prefix via environment variable (default: arm-linux-gnueabihf-)
+if(DEFINED ENV{ARM_COMPILER_PREFIX})
+    set(CROSS_COMPILE $ENV{ARM_COMPILER_PREFIX})
+elseif(DEFINED ARM_COMPILER_PREFIX)
+    set(CROSS_COMPILE ${ARM_COMPILER_PREFIX})
+else()
+    set(CROSS_COMPILE "arm-linux-gnueabihf-")
+endif()
+
+# Allow overriding toolchain bin path via environment variable
+if(DEFINED ENV{ARM_TOOLCHAIN_PATH})
+    set(CMAKE_C_COMPILER $ENV{ARM_TOOLCHAIN_PATH}/${CROSS_COMPILE}gcc)
+    set(CMAKE_CXX_COMPILER $ENV{ARM_TOOLCHAIN_PATH}/${CROSS_COMPILE}g++)
+else()
+    set(CMAKE_C_COMPILER ${CROSS_COMPILE}gcc)
+    set(CMAKE_CXX_COMPILER ${CROSS_COMPILE}g++)
+endif()
 
 if(DEFINED ENV{SYSROOT})
     set(CMAKE_FIND_ROOT_PATH $ENV{SYSROOT})
