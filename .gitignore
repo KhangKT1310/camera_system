@@ -33,3 +33,8 @@ Testing/
 vendor/
 sdk/
 *.sdk
+
+# Environment files
+.env
+!.env_example
+

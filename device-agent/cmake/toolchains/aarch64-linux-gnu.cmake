@@ -1,11 +1,29 @@
 set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR aarch64)
 
-# Specify target cross compilers
-set(CMAKE_C_COMPILER aarch64-linux-gnu-gcc)
-set(CMAKE_CXX_COMPILER aarch64-linux-gnu-g++)
+# Allow overriding compiler prefix via environment variable (default: aarch64-linux-gnu-)
+if(DEFINED ENV{ARM64_COMPILER_PREFIX})
+    set(CROSS_COMPILE $ENV{ARM64_COMPILER_PREFIX})
+elseif(DEFINED ENV{ARM_COMPILER_PREFIX})
+    set(CROSS_COMPILE $ENV{ARM_COMPILER_PREFIX})
+elseif(DEFINED ARM64_COMPILER_PREFIX)
+    set(CROSS_COMPILE ${ARM64_COMPILER_PREFIX})
+else()
+    set(CROSS_COMPILE "aarch64-linux-gnu-")
+endif()
 
-# Where is the target environment root path
+# Allow overriding toolchain bin path via environment variable
+if(DEFINED ENV{ARM64_TOOLCHAIN_PATH})
+    set(CMAKE_C_COMPILER $ENV{ARM64_TOOLCHAIN_PATH}/${CROSS_COMPILE}gcc)
+    set(CMAKE_CXX_COMPILER $ENV{ARM64_TOOLCHAIN_PATH}/${CROSS_COMPILE}g++)
+elseif(DEFINED ENV{ARM_TOOLCHAIN_PATH})
+    set(CMAKE_C_COMPILER $ENV{ARM_TOOLCHAIN_PATH}/${CROSS_COMPILE}gcc)
+    set(CMAKE_CXX_COMPILER $ENV{ARM_TOOLCHAIN_PATH}/${CROSS_COMPILE}g++)
+else()
+    set(CMAKE_C_COMPILER ${CROSS_COMPILE}gcc)
+    set(CMAKE_CXX_COMPILER ${CROSS_COMPILE}g++)
+endif()
+
 if(DEFINED ENV{SYSROOT})
     set(CMAKE_FIND_ROOT_PATH $ENV{SYSROOT})
 endif()
