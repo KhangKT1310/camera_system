@@ -5,18 +5,22 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void dummy_signaling_cb(const char *type, const char *session_id, const char *payload_json, void *user_data) {
+static char g_last_payload[1024] = {0};
+
+static void signaling_payload_cb(const char *type, const char *session_id, const char *payload_json, void *user_data) {
     (void)type;
     (void)session_id;
-    (void)payload_json;
     (void)user_data;
+    if (payload_json) {
+        strncpy(g_last_payload, payload_json, sizeof(g_last_payload) - 1);
+    }
 }
 
 static void test_signaling_malformed_json(void) {
     signaling_client_config_t config = {0};
     signaling_client_t *client = NULL;
 
-    int ret = signaling_client_create(&config, dummy_signaling_cb, NULL, &client);
+    int ret = signaling_client_create(&config, signaling_payload_cb, NULL, &client);
     assert(ret == 0);
 
     /* Reject NULL input */
@@ -28,6 +32,9 @@ static void test_signaling_malformed_json(void) {
     /* Reject JSON lacking required "type" field */
     assert(signaling_client_receive_raw(client, "{\"session_id\":\"123\"}") != 0);
 
+    /* Reject trailing garbage input */
+    assert(signaling_client_receive_raw(client, "{\"type\":\"offer\"}garbage") != 0);
+
     /* Test oversized payload (> 64KB) */
     char *oversized = (char *)malloc(70000);
     memset(oversized, 'A', 69999);
@@ -37,6 +44,45 @@ static void test_signaling_malformed_json(void) {
 
     signaling_client_destroy(client);
     printf("test_signaling_malformed_json passed!\n");
+}
+
+static void test_signaling_payload_isolation(void) {
+    signaling_client_config_t config = {0};
+    signaling_client_t *client = NULL;
+
+    int ret = signaling_client_create(&config, signaling_payload_cb, NULL, &client);
+    assert(ret == 0);
+
+    /* Test object payload isolation */
+    const char *envelope_obj =
+        "{\n"
+        "  \"version\": 1,\n"
+        "  \"type\": \"OFFER\",\n"
+        "  \"session_id\": \"sess-100\",\n"
+        "  \"payload\": {\"sdp\":\"v=0...\"}\n"
+        "}";
+
+    memset(g_last_payload, 0, sizeof(g_last_payload));
+    ret = signaling_client_receive_raw(client, envelope_obj);
+    assert(ret == 0);
+    assert(strcmp(g_last_payload, "{\"sdp\":\"v=0...\"}") == 0);
+
+    /* Test array payload isolation */
+    const char *envelope_arr =
+        "{\n"
+        "  \"version\": 1,\n"
+        "  \"type\": \"CANDIDATE\",\n"
+        "  \"session_id\": \"sess-100\",\n"
+        "  \"payload\": [\"cand1\", \"cand2\"]\n"
+        "}";
+
+    memset(g_last_payload, 0, sizeof(g_last_payload));
+    ret = signaling_client_receive_raw(client, envelope_arr);
+    assert(ret == 0);
+    assert(strcmp(g_last_payload, "[\"cand1\",\"cand2\"]") == 0);
+
+    signaling_client_destroy(client);
+    printf("test_signaling_payload_isolation passed!\n");
 }
 
 static void test_transport_candidate_bounds(void) {
@@ -64,6 +110,7 @@ static void test_transport_candidate_bounds(void) {
 int main(void) {
     printf("Running malformed_input fuzz and bounds tests...\n");
     test_signaling_malformed_json();
+    test_signaling_payload_isolation();
     test_transport_candidate_bounds();
     printf("All malformed_input tests passed successfully.\n");
     return 0;

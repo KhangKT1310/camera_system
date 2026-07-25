@@ -136,19 +136,17 @@ int signaling_client_receive_raw(signaling_client_t *c, const char *raw_json) {
         session_id = sess_node->val_string;
     }
 
-    const char *payload_json = "{}";
+    char payload_buf[MAX_JSON_ENVELOPE_LEN] = "{}";
     json_node_t *payload_node = json_get_child(root, "payload");
     if (payload_node) {
-        /* Extract payload position from raw json string */
-        const char *p_pos = strstr(raw_json, "\"payload\"");
-        if (p_pos) {
-            const char *val_pos = strchr(p_pos + 9, ':');
-            if (val_pos) payload_json = val_pos + 1;
+        if (json_stringify(payload_node, payload_buf, sizeof(payload_buf)) < 0) {
+            json_free(root);
+            return -1;
         }
     }
 
     if (c->callback) {
-        c->callback(type, session_id, payload_json, c->user_data);
+        c->callback(type, session_id, payload_buf, c->user_data);
     }
 
     json_free(root);

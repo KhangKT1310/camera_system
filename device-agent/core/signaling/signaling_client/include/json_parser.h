@@ -34,7 +34,7 @@ typedef struct json_node {
 
 /**
  * @brief Parses a raw JSON string into a structured AST node tree with bounds checking.
- * Handles string unescaping (\", \\, \n, \t, \uXXXX).
+ * Rejects trailing garbage after root element.
  * @param json_str Target raw JSON string.
  * @return Pointer to root AST node, or NULL on parse error.
  */
@@ -53,6 +53,15 @@ void json_free(json_node_t *root);
  * @return Pointer to child node, or NULL if not found.
  */
 json_node_t *json_get_child(const json_node_t *object_node, const char *key);
+
+/**
+ * @brief Serializes a JSON AST node tree back to string format.
+ * @param node JSON node to stringify.
+ * @param buf Output buffer pointer.
+ * @param max_len Buffer size in bytes.
+ * @return Number of characters written, or negative error on failure.
+ */
+int json_stringify(const json_node_t *node, char *buf, size_t max_len);
 
 #ifdef __cplusplus
 }

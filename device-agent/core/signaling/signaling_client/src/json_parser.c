@@ -145,6 +145,59 @@ static json_node_t *parse_object(const char **p, int depth, int *token_count) {
     return obj_node;
 }
 
+static json_node_t *parse_array(const char **p, int depth, int *token_count) {
+    if (**p != '[') return NULL;
+    (*p)++; /* skip '[' */
+
+    json_node_t *head = NULL;
+    json_node_t *tail = NULL;
+
+    skip_whitespace(p);
+    if (**p == ']') {
+        (*p)++;
+        json_node_t *node = (json_node_t *)calloc(1, sizeof(json_node_t));
+        if (node) node->type = JSON_TYPE_ARRAY;
+        return node;
+    }
+
+    while (**p && **p != ']') {
+        json_node_t *child = parse_value(p, depth + 1, token_count);
+        if (!child) {
+            json_free(head);
+            return NULL;
+        }
+
+        if (!head) {
+            head = child;
+            tail = child;
+        } else {
+            tail->next = child;
+            tail = child;
+        }
+
+        skip_whitespace(p);
+        if (**p == ',') {
+            (*p)++;
+        } else if (**p == ']') {
+            break;
+        } else {
+            json_free(head);
+            return NULL;
+        }
+    }
+
+    if (**p == ']') (*p)++;
+
+    json_node_t *arr_node = (json_node_t *)calloc(1, sizeof(json_node_t));
+    if (!arr_node) {
+        json_free(head);
+        return NULL;
+    }
+    arr_node->type = JSON_TYPE_ARRAY;
+    arr_node->children = head;
+    return arr_node;
+}
+
 static json_node_t *parse_value(const char **p, int depth, int *token_count) {
     skip_whitespace(p);
     if (!**p || depth > JSON_MAX_DEPTH || (*token_count) >= JSON_MAX_TOKENS) {
@@ -155,6 +208,8 @@ static json_node_t *parse_value(const char **p, int depth, int *token_count) {
 
     if (**p == '{') {
         return parse_object(p, depth, token_count);
+    } else if (**p == '[') {
+        return parse_array(p, depth, token_count);
     } else if (**p == '"') {
         char *str = parse_json_string(p);
         if (!str) return NULL;
@@ -204,7 +259,16 @@ json_node_t *json_parse(const char *json_str) {
     if (!json_str) return NULL;
     const char *p = json_str;
     int token_count = 0;
-    return parse_value(&p, 0, &token_count);
+    json_node_t *node = parse_value(&p, 0, &token_count);
+    if (!node) return NULL;
+
+    skip_whitespace(&p);
+    if (*p != '\0') {
+        json_free(node);
+        return NULL; /* Trailing garbage invalidates parse */
+    }
+
+    return node;
 }
 
 void json_free(json_node_t *root) {
@@ -228,4 +292,88 @@ json_node_t *json_get_child(const json_node_t *object_node, const char *key) {
         curr = curr->next;
     }
     return NULL;
+}
+
+int json_stringify(const json_node_t *node, char *buf, size_t max_len) {
+    if (!node || !buf || max_len == 0) return -1;
+
+    switch (node->type) {
+        case JSON_TYPE_OBJECT: {
+            size_t written = 0;
+            int len = snprintf(buf + written, max_len - written, "{");
+            if (len < 0 || (size_t)len >= max_len - written) return -1;
+            written += (size_t)len;
+
+            json_node_t *child = node->children;
+            bool first = true;
+            while (child) {
+                if (!first) {
+                    len = snprintf(buf + written, max_len - written, ",");
+                    if (len < 0 || (size_t)len >= max_len - written) return -1;
+                    written += (size_t)len;
+                }
+                first = false;
+
+                if (child->key) {
+                    len = snprintf(buf + written, max_len - written, "\"%s\":", child->key);
+                    if (len < 0 || (size_t)len >= max_len - written) return -1;
+                    written += (size_t)len;
+                }
+
+                int child_len = json_stringify(child, buf + written, max_len - written);
+                if (child_len < 0) return -1;
+                written += (size_t)child_len;
+
+                child = child->next;
+            }
+
+            len = snprintf(buf + written, max_len - written, "}");
+            if (len < 0 || (size_t)len >= max_len - written) return -1;
+            written += (size_t)len;
+            return (int)written;
+        }
+
+        case JSON_TYPE_ARRAY: {
+            size_t written = 0;
+            int len = snprintf(buf + written, max_len - written, "[");
+            if (len < 0 || (size_t)len >= max_len - written) return -1;
+            written += (size_t)len;
+
+            json_node_t *child = node->children;
+            bool first = true;
+            while (child) {
+                if (!first) {
+                    len = snprintf(buf + written, max_len - written, ",");
+                    if (len < 0 || (size_t)len >= max_len - written) return -1;
+                    written += (size_t)len;
+                }
+                first = false;
+
+                int child_len = json_stringify(child, buf + written, max_len - written);
+                if (child_len < 0) return -1;
+                written += (size_t)child_len;
+
+                child = child->next;
+            }
+
+            len = snprintf(buf + written, max_len - written, "]");
+            if (len < 0 || (size_t)len >= max_len - written) return -1;
+            written += (size_t)len;
+            return (int)written;
+        }
+
+        case JSON_TYPE_STRING:
+            return snprintf(buf, max_len, "\"%s\"", node->val_string ? node->val_string : "");
+
+        case JSON_TYPE_NUMBER:
+            return snprintf(buf, max_len, "%.6g", node->val_number);
+
+        case JSON_TYPE_BOOLEAN:
+            return snprintf(buf, max_len, "%s", node->val_bool ? "true" : "false");
+
+        case JSON_TYPE_NULL:
+            return snprintf(buf, max_len, "null");
+    }
+
+    return -1;
 }
