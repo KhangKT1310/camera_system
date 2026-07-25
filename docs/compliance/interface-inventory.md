@@ -4,8 +4,8 @@ Every new interface or protocol must be added here before implementation is cons
 
 | Interface | Protocol | Default State | Purpose | Auth Required | Encryption Required | WAN Exposure | Owner Module | Evidence Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| WebRTC media | WebRTC | Enabled | Primary live and playback media transport. | Yes | DTLS-SRTP | Controlled | `device-agent/core/webrtc_publisher` | Draft |
-| WebRTC signaling API | HTTPS / WebSocket over TLS | Enabled | Session negotiation, ICE exchange, and viewer authorization handoff. | Yes | Yes | Controlled | `cloud/signaling-service` | Draft |
+| WebRTC media | WebRTC (DTLS-SRTP) | Enabled | Primary live and playback media transport. Security guarantees: Confidentiality, Integrity, Peer Authentication, Replay Protection over DTLS + SRTP. | Yes | DTLS-SRTP | Controlled | `device-agent/core/streaming/webrtc_transport` | Validated (Phase 2 MVP) |
+| WebRTC signaling API | HTTPS / WebSocket over TLS | Enabled | Session negotiation, ICE exchange, and viewer authorization handoff. Input validation & JSON envelope protection. | Yes | Yes | Controlled | `device-agent/core/signaling/signaling_client` | Validated (Phase 2 MVP) |
 | Admin HTTP API | HTTPS | Enabled | Administrative control and device or tenant management. | Yes | Yes | Controlled | `cloud/auth-service` / `web/admin` | Draft |
 | Playback API | HTTPS | Enabled | Recording search, authorization, and playback session creation. | Yes | Yes | Controlled | `cloud/playback-service` | Draft |
 | OTA API | HTTPS | Enabled | Signed firmware or software manifest retrieval and update coordination. | Yes | Yes | Controlled | `cloud/ota-service` | Draft |
