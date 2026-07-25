@@ -302,7 +302,7 @@ static int stringify_escaped_string(const char *str, char *buf, size_t max_len) 
     buf[written++] = '"';
 
     for (const char *p = str; *p; p++) {
-        if (written + 3 >= max_len) return -1;
+        if (written + 6 >= max_len) return -1;
         switch (*p) {
             case '"':  buf[written++] = '\\'; buf[written++] = '"'; break;
             case '\\': buf[written++] = '\\'; buf[written++] = '\\'; break;
@@ -311,7 +311,15 @@ static int stringify_escaped_string(const char *str, char *buf, size_t max_len) 
             case '\t': buf[written++] = '\\'; buf[written++] = 't'; break;
             case '\b': buf[written++] = '\\'; buf[written++] = 'b'; break;
             case '\f': buf[written++] = '\\'; buf[written++] = 'f'; break;
-            default:   buf[written++] = *p; break;
+            default:
+                if ((unsigned char)*p < 0x20) {
+                    int n = snprintf(buf + written, max_len - written, "\\u%04x", (unsigned char)*p);
+                    if (n < 0) return -1;
+                    written += (size_t)n;
+                } else {
+                    buf[written++] = *p;
+                }
+                break;
         }
     }
 

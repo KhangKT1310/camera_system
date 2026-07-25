@@ -79,6 +79,18 @@ static void test_signaling_payload_isolation(void) {
     assert(ret == 0);
     assert(strcmp(g_last_payload, "{\"sdp\":\"a\\\"b\"}") == 0);
 
+    /* Test control character payload isolation e.g. \u0001 */
+    const char *envelope_ctrl =
+        "{\n"
+        "  \"type\": \"OFFER\",\n"
+        "  \"payload\": {\"ctrl\":\"\\u0001\"}\n"
+        "}";
+
+    memset(g_last_payload, 0, sizeof(g_last_payload));
+    ret = signaling_client_receive_raw(client, envelope_ctrl);
+    assert(ret == 0);
+    assert(strcmp(g_last_payload, "{\"ctrl\":\"\\u0001\"}") == 0);
+
     /* Test array payload isolation */
     const char *envelope_arr =
         "{\n"
