@@ -1,4 +1,6 @@
 add_library(camera_system_streaming
+    webrtc_transport/src/sdp_pool.c
+    webrtc_transport/src/session_event_queue.c
     webrtc_transport/src/webrtc_transport.c
     webrtc_transport/src/webrtc_transport_libdatachannel.c
     livestream_session/src/livestream_session_controller.c
