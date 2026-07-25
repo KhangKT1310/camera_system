@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Camera System - WebRTC Live Surveillance</title>
+  <link rel="stylesheet" href="index.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <header class="app-header">
+      <div class="logo-group">
+        <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+          <circle cx="12" cy="13" r="4"></circle>
+        </svg>
+        <div class="title-wrap">
+          <h1>Camera System WebRTC</h1>
+          <span class="subtitle">Secure Live Surveillance Stream</span>
+        </div>
+      </div>
+      <div class="header-badges">
+        <span id="connectionBadge" class="badge badge-idle">
+          <span class="status-dot"></span> IDLE
+        </span>
+        <span id="codecBadge" class="badge badge-codec">H.264 Baseline</span>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <div class="video-card">
+        <div class="video-container">
+          <video id="remoteVideo" autoplay playsinline muted></video>
+          <div id="videoOverlay" class="video-overlay">
+            <div class="spinner"></div>
+            <p id="overlayStatus">Click "Start Livestream" to connect</p>
+          </div>
+        </div>
+
+        <div class="controls-bar">
+          <div class="input-group">
+            <label for="serverUri">Signaling WS Server:</label>
+            <input type="text" id="serverUri" value="ws://localhost:8080/ws" placeholder="ws://localhost:8080/ws">
+          </div>
+          <div class="input-group">
+            <label for="sessionId">Session ID:</label>
+            <input type="text" id="sessionId" value="stream1" placeholder="stream1">
+          </div>
+          <div class="action-buttons">
+            <button id="btnConnect" class="btn btn-primary">Start Livestream</button>
+            <button id="btnDisconnect" class="btn btn-danger" disabled>Disconnect</button>
+          </div>
+        </div>
+      </div>
+
+      <aside class="stats-sidebar">
+        <h3>Stream Metrics</h3>
+        <div class="metric-row">
+          <span class="metric-label">Ice Connection State</span>
+          <span id="valIceState" class="metric-value">new</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Signaling Connection</span>
+          <span id="valWsState" class="metric-value">DISCONNECTED</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Packets Received</span>
+          <span id="valPacketsRecv" class="metric-value">0</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Frames Decoded</span>
+          <span id="valFramesDecoded" class="metric-value">0</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Resolution</span>
+          <span id="valResolution" class="metric-value">0x0</span>
+        </div>
+
+        <div class="log-panel">
+          <h4>Event Log</h4>
+          <div id="logConsole" class="log-console"></div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
