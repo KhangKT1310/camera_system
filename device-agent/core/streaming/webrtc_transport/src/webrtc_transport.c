@@ -83,10 +83,15 @@ int webrtc_transport_create(const webrtc_transport_config_t *config,
     t->has_remote_description = false;
     t->pending_candidate_count = 0;
 
-    if (pthread_mutex_init(&t->lock, NULL) != 0) {
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    if (pthread_mutex_init(&t->lock, &attr) != 0) {
+        pthread_mutexattr_destroy(&attr);
         free(t);
         return -1;
     }
+    pthread_mutexattr_destroy(&attr);
 
     if (t->config.enable_libdatachannel) {
         ldc_callbacks_t ldc_cbs = {
@@ -110,11 +115,13 @@ void webrtc_transport_destroy(webrtc_transport_t *t) {
     pthread_mutex_lock(&t->lock);
     set_state(t, WEBRTC_STATE_CLOSED);
 
-    if (t->backend_ctx) {
-        ldc_backend_destroy((ldc_backend_t *)t->backend_ctx);
-        t->backend_ctx = NULL;
-    }
+    ldc_backend_t *b = (ldc_backend_t *)t->backend_ctx;
+    t->backend_ctx = NULL;
     pthread_mutex_unlock(&t->lock);
+
+    if (b) {
+        ldc_backend_destroy(b);
+    }
 
     pthread_mutex_destroy(&t->lock);
     free(t);
@@ -128,10 +135,11 @@ int webrtc_transport_create_offer(webrtc_transport_t *t) {
     pthread_mutex_lock(&t->lock);
     set_state(t, WEBRTC_STATE_CREATING);
 
-    if (t->config.enable_libdatachannel && t->backend_ctx) {
+    ldc_backend_t *b = (ldc_backend_t *)t->backend_ctx;
+    if (t->config.enable_libdatachannel && b) {
         set_state(t, WEBRTC_STATE_NEGOTIATING);
         pthread_mutex_unlock(&t->lock);
-        return ldc_backend_create_offer((ldc_backend_t *)t->backend_ctx);
+        return ldc_backend_create_offer(b);
     }
 
     /* Generate local offer SDP simulation for mock loopback */
@@ -168,25 +176,28 @@ int webrtc_transport_set_remote_description(webrtc_transport_t *t, const char *t
     t->has_remote_description = true;
     set_state(t, WEBRTC_STATE_CONNECTING);
 
-    if (t->config.enable_libdatachannel && t->backend_ctx) {
-        ldc_backend_set_remote_description((ldc_backend_t *)t->backend_ctx, type, sdp);
-    }
-
-    /* Flush pending ICE candidates that arrived before remote SDP description */
-    for (size_t i = 0; i < t->pending_candidate_count; i++) {
-        if (t->config.enable_libdatachannel && t->backend_ctx) {
-            ldc_backend_add_candidate((ldc_backend_t *)t->backend_ctx,
-                                      t->pending_candidates[i].candidate,
-                                      t->pending_candidates[i].mid);
-        }
+    ldc_backend_t *b = (ldc_backend_t *)t->backend_ctx;
+    pending_candidate_t pending[WEBRTC_MAX_PENDING_CANDIDATES];
+    size_t pending_count = t->pending_candidate_count;
+    for (size_t i = 0; i < pending_count; i++) {
+        pending[i] = t->pending_candidates[i];
     }
     t->pending_candidate_count = 0;
 
-    if (!t->config.enable_libdatachannel) {
+    bool is_ldc = t->config.enable_libdatachannel;
+    pthread_mutex_unlock(&t->lock);
+
+    if (is_ldc && b) {
+        ldc_backend_set_remote_description(b, type, sdp);
+        for (size_t i = 0; i < pending_count; i++) {
+            ldc_backend_add_candidate(b, pending[i].candidate, pending[i].mid);
+        }
+    } else {
+        pthread_mutex_lock(&t->lock);
         set_state(t, WEBRTC_STATE_CONNECTED);
+        pthread_mutex_unlock(&t->lock);
     }
 
-    pthread_mutex_unlock(&t->lock);
     return 0;
 }
 
@@ -196,8 +207,11 @@ int webrtc_transport_add_remote_candidate(webrtc_transport_t *t, const char *can
     }
 
     pthread_mutex_lock(&t->lock);
+    bool has_remote = t->has_remote_description;
+    bool is_ldc = t->config.enable_libdatachannel;
+    ldc_backend_t *b = (ldc_backend_t *)t->backend_ctx;
 
-    if (!t->has_remote_description) {
+    if (!has_remote) {
         /* Queue candidate if remote description is not yet set */
         if (t->pending_candidate_count < WEBRTC_MAX_PENDING_CANDIDATES) {
             strncpy(t->pending_candidates[t->pending_candidate_count].candidate, candidate, WEBRTC_MAX_CANDIDATE_LENGTH - 1);
@@ -207,17 +221,20 @@ int webrtc_transport_add_remote_candidate(webrtc_transport_t *t, const char *can
                 t->pending_candidates[t->pending_candidate_count].mid[0] = '\0';
             }
             t->pending_candidate_count++;
+            pthread_mutex_unlock(&t->lock);
+            return 0;
         } else {
             pthread_mutex_unlock(&t->lock);
             return -1; /* Queue overflow */
         }
-    } else {
-        if (t->config.enable_libdatachannel && t->backend_ctx) {
-            ldc_backend_add_candidate((ldc_backend_t *)t->backend_ctx, candidate, mid);
-        }
     }
 
     pthread_mutex_unlock(&t->lock);
+
+    if (is_ldc && b) {
+        ldc_backend_add_candidate(b, candidate, mid);
+    }
+
     return 0;
 }
 
@@ -231,14 +248,14 @@ int webrtc_transport_send_rtp(webrtc_transport_t *t, const uint8_t *packet, size
         pthread_mutex_unlock(&t->lock);
         return -1;
     }
+    bool is_ldc = t->config.enable_libdatachannel;
+    ldc_backend_t *b = (ldc_backend_t *)t->backend_ctx;
+    pthread_mutex_unlock(&t->lock);
 
-    if (t->config.enable_libdatachannel && t->backend_ctx) {
-        int ret = ldc_backend_send_rtp((ldc_backend_t *)t->backend_ctx, packet, size);
-        pthread_mutex_unlock(&t->lock);
-        return ret;
+    if (is_ldc && b) {
+        return ldc_backend_send_rtp(b, packet, size);
     }
 
-    pthread_mutex_unlock(&t->lock);
     return 0;
 }
 
