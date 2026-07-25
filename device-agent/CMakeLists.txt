@@ -1,34 +1,45 @@
-cmake_minimum_required(VERSION 3.20)
-project(camera_device_agent C CXX)
+cmake_minimum_required(VERSION 3.16)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-include(CompilerWarnings)
-
-option(ENABLE_MOCK "Enable mock platform build" ON)
-option(ENABLE_TESTS "Enable test suite build" ON)
-option(ENABLE_WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
-
-# Subdirectories
+# Configure Core & Platform Subdirectories
 add_subdirectory(core/hal)
 add_subdirectory(core/media)
 add_subdirectory(core/streaming)
 add_subdirectory(core/signaling)
+add_subdirectory(platform/mock)
 
-if(TARGET hal_interface)
-    set_project_compiler_warnings(hal_interface)
-endif()
+# Standalone Camera Agent Executable
+add_executable(camera_agent
+    src/camera_agent.c
+    src/main.c
+)
 
-if(ENABLE_MOCK)
-    add_subdirectory(platform/mock)
-    if(TARGET hal_platform_mock)
-        set_project_compiler_warnings(hal_platform_mock)
-    endif()
+target_include_directories(camera_agent PUBLIC
+    src
+    core/media/media_pipeline/include
+    core/media/rtp_packetizer/include
+    core/streaming/webrtc_transport/include
+    core/streaming/livestream_session/include
+    core/signaling/signaling_client/include
+    core/hal/include
+    core/hal/include/hal
+)
+
+target_link_libraries(camera_agent PRIVATE
+    camera_system_media
+    camera_system_streaming
+    camera_system_signaling
+    hal_interface
+    hal_platform_mock
+    pthread
+)
+
+if(COMMAND set_project_compiler_warnings)
+    set_project_compiler_warnings(camera_agent)
 endif()
 
 if(ENABLE_TESTS)
-    enable_testing()
     add_subdirectory(tests)
 endif()
