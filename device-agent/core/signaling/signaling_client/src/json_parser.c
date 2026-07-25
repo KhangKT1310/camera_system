@@ -294,30 +294,58 @@ json_node_t *json_get_child(const json_node_t *object_node, const char *key) {
     return NULL;
 }
 
+static int stringify_escaped_string(const char *str, char *buf, size_t max_len) {
+    if (!buf || max_len < 3) return -1;
+    if (!str) str = "";
+
+    size_t written = 0;
+    buf[written++] = '"';
+
+    for (const char *p = str; *p; p++) {
+        if (written + 3 >= max_len) return -1;
+        switch (*p) {
+            case '"':  buf[written++] = '\\'; buf[written++] = '"'; break;
+            case '\\': buf[written++] = '\\'; buf[written++] = '\\'; break;
+            case '\n': buf[written++] = '\\'; buf[written++] = 'n'; break;
+            case '\r': buf[written++] = '\\'; buf[written++] = 'r'; break;
+            case '\t': buf[written++] = '\\'; buf[written++] = 't'; break;
+            case '\b': buf[written++] = '\\'; buf[written++] = 'b'; break;
+            case '\f': buf[written++] = '\\'; buf[written++] = 'f'; break;
+            default:   buf[written++] = *p; break;
+        }
+    }
+
+    if (written + 1 >= max_len) return -1;
+    buf[written++] = '"';
+    buf[written] = '\0';
+    return (int)written;
+}
+
 int json_stringify(const json_node_t *node, char *buf, size_t max_len) {
     if (!node || !buf || max_len == 0) return -1;
 
     switch (node->type) {
         case JSON_TYPE_OBJECT: {
             size_t written = 0;
-            int len = snprintf(buf + written, max_len - written, "{");
-            if (len < 0 || (size_t)len >= max_len - written) return -1;
-            written += (size_t)len;
+            if (written + 2 > max_len) return -1;
+            buf[written++] = '{';
 
             json_node_t *child = node->children;
             bool first = true;
             while (child) {
                 if (!first) {
-                    len = snprintf(buf + written, max_len - written, ",");
-                    if (len < 0 || (size_t)len >= max_len - written) return -1;
-                    written += (size_t)len;
+                    if (written + 2 > max_len) return -1;
+                    buf[written++] = ',';
                 }
                 first = false;
 
                 if (child->key) {
-                    len = snprintf(buf + written, max_len - written, "\"%s\":", child->key);
-                    if (len < 0 || (size_t)len >= max_len - written) return -1;
-                    written += (size_t)len;
+                    int klen = stringify_escaped_string(child->key, buf + written, max_len - written);
+                    if (klen < 0) return -1;
+                    written += (size_t)klen;
+
+                    if (written + 2 > max_len) return -1;
+                    buf[written++] = ':';
                 }
 
                 int child_len = json_stringify(child, buf + written, max_len - written);
@@ -327,25 +355,23 @@ int json_stringify(const json_node_t *node, char *buf, size_t max_len) {
                 child = child->next;
             }
 
-            len = snprintf(buf + written, max_len - written, "}");
-            if (len < 0 || (size_t)len >= max_len - written) return -1;
-            written += (size_t)len;
+            if (written + 2 > max_len) return -1;
+            buf[written++] = '}';
+            buf[written] = '\0';
             return (int)written;
         }
 
         case JSON_TYPE_ARRAY: {
             size_t written = 0;
-            int len = snprintf(buf + written, max_len - written, "[");
-            if (len < 0 || (size_t)len >= max_len - written) return -1;
-            written += (size_t)len;
+            if (written + 2 > max_len) return -1;
+            buf[written++] = '[';
 
             json_node_t *child = node->children;
             bool first = true;
             while (child) {
                 if (!first) {
-                    len = snprintf(buf + written, max_len - written, ",");
-                    if (len < 0 || (size_t)len >= max_len - written) return -1;
-                    written += (size_t)len;
+                    if (written + 2 > max_len) return -1;
+                    buf[written++] = ',';
                 }
                 first = false;
 
@@ -356,14 +382,14 @@ int json_stringify(const json_node_t *node, char *buf, size_t max_len) {
                 child = child->next;
             }
 
-            len = snprintf(buf + written, max_len - written, "]");
-            if (len < 0 || (size_t)len >= max_len - written) return -1;
-            written += (size_t)len;
+            if (written + 2 > max_len) return -1;
+            buf[written++] = ']';
+            buf[written] = '\0';
             return (int)written;
         }
 
         case JSON_TYPE_STRING:
-            return snprintf(buf, max_len, "\"%s\"", node->val_string ? node->val_string : "");
+            return stringify_escaped_string(node->val_string, buf, max_len);
 
         case JSON_TYPE_NUMBER:
             return snprintf(buf, max_len, "%.6g", node->val_number);

@@ -67,6 +67,18 @@ static void test_signaling_payload_isolation(void) {
     assert(ret == 0);
     assert(strcmp(g_last_payload, "{\"sdp\":\"v=0...\"}") == 0);
 
+    /* Test escaped quote payload isolation e.g. {"payload":{"sdp":"a\"b"}} */
+    const char *envelope_escaped =
+        "{\n"
+        "  \"type\": \"OFFER\",\n"
+        "  \"payload\": {\"sdp\":\"a\\\"b\"}\n"
+        "}";
+
+    memset(g_last_payload, 0, sizeof(g_last_payload));
+    ret = signaling_client_receive_raw(client, envelope_escaped);
+    assert(ret == 0);
+    assert(strcmp(g_last_payload, "{\"sdp\":\"a\\\"b\"}") == 0);
+
     /* Test array payload isolation */
     const char *envelope_arr =
         "{\n"
