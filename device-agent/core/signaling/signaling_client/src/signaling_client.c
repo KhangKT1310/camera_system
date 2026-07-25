@@ -1,4 +1,5 @@
 #include "signaling_client.h"
+#include "json_parser.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -116,49 +117,40 @@ int signaling_client_receive_raw(signaling_client_t *c, const char *raw_json) {
         return -1; /* Malformed or oversized envelope */
     }
 
-    /* Basic C string parsing for type, session_id, and payload bounds */
-    char type[MAX_FIELD_LEN] = {0};
-    char session_id[MAX_FIELD_LEN] = {0};
+    json_node_t *root = json_parse(raw_json);
+    if (!root || root->type != JSON_TYPE_OBJECT) {
+        if (root) json_free(root);
+        return -1;
+    }
 
-    const char *type_pos = strstr(raw_json, "\"type\"");
-    if (!type_pos) {
+    json_node_t *type_node = json_get_child(root, "type");
+    if (!type_node || type_node->type != JSON_TYPE_STRING || !type_node->val_string) {
+        json_free(root);
         return -1;
     }
-    const char *val_start = strchr(type_pos + 6, '"');
-    if (!val_start) {
-        return -1;
-    }
-    const char *val_end = strchr(val_start + 1, '"');
-    if (!val_end || (size_t)(val_end - val_start - 1) >= sizeof(type)) {
-        return -1;
-    }
-    strncpy(type, val_start + 1, (size_t)(val_end - val_start - 1));
 
-    const char *sess_pos = strstr(raw_json, "\"session_id\"");
-    if (sess_pos) {
-        val_start = strchr(sess_pos + 12, '"');
-        if (val_start) {
-            val_end = strchr(val_start + 1, '"');
-            if (val_end && (size_t)(val_end - val_start - 1) < sizeof(session_id)) {
-                strncpy(session_id, val_start + 1, (size_t)(val_end - val_start - 1));
-            }
+    const char *type = type_node->val_string;
+    const char *session_id = "";
+    json_node_t *sess_node = json_get_child(root, "session_id");
+    if (sess_node && sess_node->type == JSON_TYPE_STRING && sess_node->val_string) {
+        session_id = sess_node->val_string;
+    }
+
+    const char *payload_json = "{}";
+    json_node_t *payload_node = json_get_child(root, "payload");
+    if (payload_node) {
+        /* Extract payload position from raw json string */
+        const char *p_pos = strstr(raw_json, "\"payload\"");
+        if (p_pos) {
+            const char *val_pos = strchr(p_pos + 9, ':');
+            if (val_pos) payload_json = val_pos + 1;
         }
-    }
-
-    const char *payload_pos = strstr(raw_json, "\"payload\"");
-    const char *payload_json = payload_pos ? strchr(payload_pos + 9, ':') : NULL;
-    if (payload_json) {
-        payload_json++;
-        while (*payload_json == ' ' || *payload_json == '\n' || *payload_json == '\r') {
-            payload_json++;
-        }
-    } else {
-        payload_json = "{}";
     }
 
     if (c->callback) {
         c->callback(type, session_id, payload_json, c->user_data);
     }
 
+    json_free(root);
     return 0;
 }
