@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(camera_device_agent C CXX)
 
-set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -13,6 +13,9 @@ option(ENABLE_WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
 
 # Subdirectories
 add_subdirectory(core/hal)
+add_subdirectory(core/media)
+add_subdirectory(core/streaming)
+add_subdirectory(core/signaling)
 
 if(TARGET hal_interface)
     set_project_compiler_warnings(hal_interface)

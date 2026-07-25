@@ -1,0 +1,70 @@
+#include "signaling_client.h"
+#include "webrtc_transport.h"
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void dummy_signaling_cb(const char *type, const char *session_id, const char *payload_json, void *user_data) {
+    (void)type;
+    (void)session_id;
+    (void)payload_json;
+    (void)user_data;
+}
+
+static void test_signaling_malformed_json(void) {
+    signaling_client_config_t config = {0};
+    signaling_client_t *client = NULL;
+
+    int ret = signaling_client_create(&config, dummy_signaling_cb, NULL, &client);
+    assert(ret == 0);
+
+    /* Reject NULL input */
+    assert(signaling_client_receive_raw(client, NULL) != 0);
+
+    /* Reject empty JSON */
+    assert(signaling_client_receive_raw(client, "") != 0);
+
+    /* Reject JSON lacking required "type" field */
+    assert(signaling_client_receive_raw(client, "{\"session_id\":\"123\"}") != 0);
+
+    /* Test oversized payload (> 64KB) */
+    char *oversized = (char *)malloc(70000);
+    memset(oversized, 'A', 69999);
+    oversized[69999] = '\0';
+    assert(signaling_client_receive_raw(client, oversized) != 0);
+    free(oversized);
+
+    signaling_client_destroy(client);
+    printf("test_signaling_malformed_json passed!\n");
+}
+
+static void test_transport_candidate_bounds(void) {
+    webrtc_transport_callbacks_t callbacks = {0};
+    webrtc_transport_config_t config = {0};
+    webrtc_transport_t *transport = NULL;
+
+    int ret = webrtc_transport_create(&config, &callbacks, NULL, &transport);
+    assert(ret == 0);
+
+    /* Attempt to queue more than WEBRTC_MAX_PENDING_CANDIDATES before SDP */
+    for (int i = 0; i < WEBRTC_MAX_PENDING_CANDIDATES; i++) {
+        ret = webrtc_transport_add_remote_candidate(transport, "candidate:1 1 UDP 2122260223 127.0.0.1 5000 typ host", "video");
+        assert(ret == 0);
+    }
+
+    /* 33rd candidate should be rejected due to queue overflow bounds */
+    ret = webrtc_transport_add_remote_candidate(transport, "candidate:1 1 UDP 2122260223 127.0.0.1 5001 typ host", "video");
+    assert(ret != 0);
+
+    webrtc_transport_destroy(transport);
+    printf("test_transport_candidate_bounds passed!\n");
+}
+
+int main(void) {
+    printf("Running malformed_input fuzz and bounds tests...\n");
+    test_signaling_malformed_json();
+    test_transport_candidate_bounds();
+    printf("All malformed_input tests passed successfully.\n");
+    return 0;
+}
