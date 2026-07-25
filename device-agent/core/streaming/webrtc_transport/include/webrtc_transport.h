@@ -41,7 +41,12 @@ typedef struct {
 typedef struct webrtc_transport webrtc_transport_t;
 
 /**
- * @brief Creates a WebRTC transport instance.
+ * @brief Creates a WebRTC transport instance. Initial refcount is 1.
+ * Ownership Contract:
+ * - The caller receives 1 creation reference.
+ * - When sharing a pointer across asynchronous threads, callers MUST call
+ *   webrtc_transport_retain() before dispatching to a worker thread and
+ *   webrtc_transport_release() when the worker thread finishes.
  * @param config Configuration parameters.
  * @param callbacks Async notification callbacks.
  * @param user_data Opaque pointer passed to callbacks.
@@ -54,20 +59,20 @@ int webrtc_transport_create(const webrtc_transport_config_t *config,
                            webrtc_transport_t **out_transport);
 
 /**
- * @brief Retains a reference to a WebRTC transport instance.
- * @param transport Handle to transport.
+ * @brief Retains a reference to a WebRTC transport instance for cross-thread sharing.
+ * @param transport Valid non-null handle to transport.
  * @return Retained transport pointer.
  */
 webrtc_transport_t *webrtc_transport_retain(webrtc_transport_t *transport);
 
 /**
- * @brief Releases a reference from a WebRTC transport instance. Frees memory when refcount hits 0.
- * @param transport Handle to transport.
+ * @brief Releases a reference from a WebRTC transport instance. Memory is freed when refcount hits 0.
+ * @param transport Valid handle to transport.
  */
 void webrtc_transport_release(webrtc_transport_t *transport);
 
 /**
- * @brief Destroys a WebRTC transport instance (marks CLOSED and releases creation reference).
+ * @brief Marks transport state as CLOSED and releases the creator's reference.
  * @param transport Handle to transport.
  */
 void webrtc_transport_destroy(webrtc_transport_t *transport);
@@ -107,7 +112,7 @@ int webrtc_transport_add_remote_candidate(webrtc_transport_t *transport, const c
 int webrtc_transport_send_rtp(webrtc_transport_t *transport, const uint8_t *packet, size_t size);
 
 /**
- * @brief Gets current WebRTC transport state.
+ * @brief Gets current WebRTC transport state in a thread-safe manner.
  * @param transport Handle to transport.
  * @return Current webrtc_state_t.
  */
