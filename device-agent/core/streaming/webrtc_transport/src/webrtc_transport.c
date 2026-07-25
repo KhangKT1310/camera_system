@@ -1,9 +1,11 @@
 #include "webrtc_transport.h"
 #include "libdatachannel_adapter.h"
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 typedef struct {
     char candidate[WEBRTC_MAX_CANDIDATE_LENGTH];
@@ -24,6 +26,7 @@ struct webrtc_transport {
 
     /* Backend context handle for libdatachannel or mock engine */
     void *backend_ctx;
+    atomic_int active_callers;
 };
 
 static void set_state(webrtc_transport_t *t, webrtc_state_t new_state) {
@@ -58,6 +61,25 @@ static void on_ldc_state_changed(void *user, webrtc_state_t state) {
     }
 }
 
+static ldc_backend_t *acquire_backend(webrtc_transport_t *t) {
+    if (!t) return NULL;
+    pthread_mutex_lock(&t->lock);
+    if (t->state == WEBRTC_STATE_CLOSED || !t->backend_ctx || !t->config.enable_libdatachannel) {
+        pthread_mutex_unlock(&t->lock);
+        return NULL;
+    }
+    atomic_fetch_add(&t->active_callers, 1);
+    ldc_backend_t *b = (ldc_backend_t *)t->backend_ctx;
+    pthread_mutex_unlock(&t->lock);
+    return b;
+}
+
+static void release_backend(webrtc_transport_t *t) {
+    if (t) {
+        atomic_fetch_sub(&t->active_callers, 1);
+    }
+}
+
 int webrtc_transport_create(const webrtc_transport_config_t *config,
                            const webrtc_transport_callbacks_t *callbacks,
                            void *user_data,
@@ -82,6 +104,7 @@ int webrtc_transport_create(const webrtc_transport_config_t *config,
     t->state = WEBRTC_STATE_IDLE;
     t->has_remote_description = false;
     t->pending_candidate_count = 0;
+    atomic_init(&t->active_callers, 0);
 
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
@@ -119,6 +142,12 @@ void webrtc_transport_destroy(webrtc_transport_t *t) {
     t->backend_ctx = NULL;
     pthread_mutex_unlock(&t->lock);
 
+    /* Wait for concurrent active callers to exit backend adapter call */
+    while (atomic_load(&t->active_callers) > 0) {
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 1000000 }; /* 1ms sleep */
+        nanosleep(&ts, NULL);
+    }
+
     if (b) {
         ldc_backend_destroy(b);
     }
@@ -134,12 +163,14 @@ int webrtc_transport_create_offer(webrtc_transport_t *t) {
 
     pthread_mutex_lock(&t->lock);
     set_state(t, WEBRTC_STATE_CREATING);
+    set_state(t, WEBRTC_STATE_NEGOTIATING);
+    pthread_mutex_unlock(&t->lock);
 
-    ldc_backend_t *b = (ldc_backend_t *)t->backend_ctx;
-    if (t->config.enable_libdatachannel && b) {
-        set_state(t, WEBRTC_STATE_NEGOTIATING);
-        pthread_mutex_unlock(&t->lock);
-        return ldc_backend_create_offer(b);
+    ldc_backend_t *b = acquire_backend(t);
+    if (b) {
+        int ret = ldc_backend_create_offer(b);
+        release_backend(t);
+        return ret;
     }
 
     /* Generate local offer SDP simulation for mock loopback */
@@ -153,8 +184,7 @@ int webrtc_transport_create_offer(webrtc_transport_t *t) {
         "a=rtpmap:96 H264/90000\r\n"
         "a=sendonly\r\n";
 
-    set_state(t, WEBRTC_STATE_NEGOTIATING);
-
+    pthread_mutex_lock(&t->lock);
     if (t->callbacks.on_local_description) {
         t->callbacks.on_local_description(t->user_data, "offer", mock_offer_sdp);
     }
@@ -162,8 +192,8 @@ int webrtc_transport_create_offer(webrtc_transport_t *t) {
     if (t->callbacks.on_local_candidate) {
         t->callbacks.on_local_candidate(t->user_data, "candidate:1 1 UDP 2122260223 127.0.0.1 50000 typ host", "video");
     }
-
     pthread_mutex_unlock(&t->lock);
+
     return 0;
 }
 
@@ -176,22 +206,21 @@ int webrtc_transport_set_remote_description(webrtc_transport_t *t, const char *t
     t->has_remote_description = true;
     set_state(t, WEBRTC_STATE_CONNECTING);
 
-    ldc_backend_t *b = (ldc_backend_t *)t->backend_ctx;
     pending_candidate_t pending[WEBRTC_MAX_PENDING_CANDIDATES];
     size_t pending_count = t->pending_candidate_count;
     for (size_t i = 0; i < pending_count; i++) {
         pending[i] = t->pending_candidates[i];
     }
     t->pending_candidate_count = 0;
-
-    bool is_ldc = t->config.enable_libdatachannel;
     pthread_mutex_unlock(&t->lock);
 
-    if (is_ldc && b) {
+    ldc_backend_t *b = acquire_backend(t);
+    if (b) {
         ldc_backend_set_remote_description(b, type, sdp);
         for (size_t i = 0; i < pending_count; i++) {
             ldc_backend_add_candidate(b, pending[i].candidate, pending[i].mid);
         }
+        release_backend(t);
     } else {
         pthread_mutex_lock(&t->lock);
         set_state(t, WEBRTC_STATE_CONNECTED);
@@ -207,11 +236,7 @@ int webrtc_transport_add_remote_candidate(webrtc_transport_t *t, const char *can
     }
 
     pthread_mutex_lock(&t->lock);
-    bool has_remote = t->has_remote_description;
-    bool is_ldc = t->config.enable_libdatachannel;
-    ldc_backend_t *b = (ldc_backend_t *)t->backend_ctx;
-
-    if (!has_remote) {
+    if (!t->has_remote_description) {
         /* Queue candidate if remote description is not yet set */
         if (t->pending_candidate_count < WEBRTC_MAX_PENDING_CANDIDATES) {
             strncpy(t->pending_candidates[t->pending_candidate_count].candidate, candidate, WEBRTC_MAX_CANDIDATE_LENGTH - 1);
@@ -228,11 +253,12 @@ int webrtc_transport_add_remote_candidate(webrtc_transport_t *t, const char *can
             return -1; /* Queue overflow */
         }
     }
-
     pthread_mutex_unlock(&t->lock);
 
-    if (is_ldc && b) {
+    ldc_backend_t *b = acquire_backend(t);
+    if (b) {
         ldc_backend_add_candidate(b, candidate, mid);
+        release_backend(t);
     }
 
     return 0;
@@ -248,12 +274,13 @@ int webrtc_transport_send_rtp(webrtc_transport_t *t, const uint8_t *packet, size
         pthread_mutex_unlock(&t->lock);
         return -1;
     }
-    bool is_ldc = t->config.enable_libdatachannel;
-    ldc_backend_t *b = (ldc_backend_t *)t->backend_ctx;
     pthread_mutex_unlock(&t->lock);
 
-    if (is_ldc && b) {
-        return ldc_backend_send_rtp(b, packet, size);
+    ldc_backend_t *b = acquire_backend(t);
+    if (b) {
+        int ret = ldc_backend_send_rtp(b, packet, size);
+        release_backend(t);
+        return ret;
     }
 
     return 0;
