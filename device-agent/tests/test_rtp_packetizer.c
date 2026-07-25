@@ -9,6 +9,7 @@
 static int g_packet_count = 0;
 static size_t g_last_packet_size = 0;
 static uint8_t g_last_payload_type = 0;
+static uint32_t g_last_ssrc = 0;
 
 static void on_rtp_packet(const uint8_t *packet_data, size_t packet_size, void *user_data) {
     (void)user_data;
@@ -19,6 +20,13 @@ static void on_rtp_packet(const uint8_t *packet_data, size_t packet_size, void *
     g_packet_count++;
     g_last_packet_size = packet_size;
     g_last_payload_type = packet_data[1] & 0x7F;
+
+    uint32_t ssrc_net = 0;
+    memcpy(&ssrc_net, &packet_data[8], sizeof(uint32_t));
+    g_last_ssrc = ((ssrc_net & 0xFF000000) >> 24) |
+                  ((ssrc_net & 0x00FF0000) >> 8) |
+                  ((ssrc_net & 0x0000FF00) << 8) |
+                  ((ssrc_net & 0x000000FF) << 24);
 }
 
 static void test_rtp_single_nalu(void) {
@@ -54,11 +62,12 @@ static void test_rtp_single_nalu(void) {
     ret = rtp_packetizer_push_frame(packetizer, &frame);
     assert(ret == 0);
     assert(g_packet_count == 3);
-    assert(g_last_payload_type == 96);
+    assert(g_last_payload_type == config.payload_type);
+    assert(g_last_ssrc == config.ssrc);
 
     media_buffer_release(buf);
     rtp_packetizer_destroy(packetizer);
-    printf("test_rtp_single_nalu passed!\n");
+    printf("test_rtp_single_nalu passed with cross-layer PT/SSRC assertions!\n");
 }
 
 static void test_rtp_fua_fragmentation(void) {
@@ -92,8 +101,9 @@ static void test_rtp_fua_fragmentation(void) {
 
     ret = rtp_packetizer_push_frame(packetizer, &frame);
     assert(ret == 0);
-    /* With MTU 500, max payload = 488 bytes. 1196 NALU bytes split into 3 FU-A packets */
     assert(g_packet_count >= 3);
+    assert(g_last_payload_type == config.payload_type);
+    assert(g_last_ssrc == config.ssrc);
 
     media_buffer_release(buf);
     rtp_packetizer_destroy(packetizer);
