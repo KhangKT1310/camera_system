@@ -1,4 +1,5 @@
 #include "webrtc_transport.h"
+#include "libdatachannel_adapter.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +35,29 @@ static void set_state(webrtc_transport_t *t, webrtc_state_t new_state) {
     }
 }
 
+static void on_ldc_local_description(void *user, const char *type, const char *sdp) {
+    webrtc_transport_t *t = (webrtc_transport_t *)user;
+    if (t && t->callbacks.on_local_description) {
+        t->callbacks.on_local_description(t->user_data, type, sdp);
+    }
+}
+
+static void on_ldc_local_candidate(void *user, const char *candidate, const char *mid) {
+    webrtc_transport_t *t = (webrtc_transport_t *)user;
+    if (t && t->callbacks.on_local_candidate) {
+        t->callbacks.on_local_candidate(t->user_data, candidate, mid);
+    }
+}
+
+static void on_ldc_state_changed(void *user, webrtc_state_t state) {
+    webrtc_transport_t *t = (webrtc_transport_t *)user;
+    if (t) {
+        pthread_mutex_lock(&t->lock);
+        set_state(t, state);
+        pthread_mutex_unlock(&t->lock);
+    }
+}
+
 int webrtc_transport_create(const webrtc_transport_config_t *config,
                            const webrtc_transport_callbacks_t *callbacks,
                            void *user_data,
@@ -64,6 +88,16 @@ int webrtc_transport_create(const webrtc_transport_config_t *config,
         return -1;
     }
 
+    if (t->config.enable_libdatachannel) {
+        ldc_callbacks_t ldc_cbs = {
+            .on_local_description = on_ldc_local_description,
+            .on_local_candidate = on_ldc_local_candidate,
+            .on_state_changed = on_ldc_state_changed,
+            .on_keyframe_requested = NULL
+        };
+        ldc_backend_create(&t->config, &ldc_cbs, t, (ldc_backend_t **)&t->backend_ctx);
+    }
+
     *out_transport = t;
     return 0;
 }
@@ -75,6 +109,11 @@ void webrtc_transport_destroy(webrtc_transport_t *t) {
 
     pthread_mutex_lock(&t->lock);
     set_state(t, WEBRTC_STATE_CLOSED);
+
+    if (t->backend_ctx) {
+        ldc_backend_destroy((ldc_backend_t *)t->backend_ctx);
+        t->backend_ctx = NULL;
+    }
     pthread_mutex_unlock(&t->lock);
 
     pthread_mutex_destroy(&t->lock);
@@ -88,6 +127,12 @@ int webrtc_transport_create_offer(webrtc_transport_t *t) {
 
     pthread_mutex_lock(&t->lock);
     set_state(t, WEBRTC_STATE_CREATING);
+
+    if (t->config.enable_libdatachannel && t->backend_ctx) {
+        set_state(t, WEBRTC_STATE_NEGOTIATING);
+        pthread_mutex_unlock(&t->lock);
+        return ldc_backend_create_offer((ldc_backend_t *)t->backend_ctx);
+    }
 
     /* Generate local offer SDP simulation for mock loopback */
     const char *mock_offer_sdp =
@@ -106,7 +151,6 @@ int webrtc_transport_create_offer(webrtc_transport_t *t) {
         t->callbacks.on_local_description(t->user_data, "offer", mock_offer_sdp);
     }
 
-    /* Simulate ICE candidate generation */
     if (t->callbacks.on_local_candidate) {
         t->callbacks.on_local_candidate(t->user_data, "candidate:1 1 UDP 2122260223 127.0.0.1 50000 typ host", "video");
     }
@@ -124,15 +168,23 @@ int webrtc_transport_set_remote_description(webrtc_transport_t *t, const char *t
     t->has_remote_description = true;
     set_state(t, WEBRTC_STATE_CONNECTING);
 
+    if (t->config.enable_libdatachannel && t->backend_ctx) {
+        ldc_backend_set_remote_description((ldc_backend_t *)t->backend_ctx, type, sdp);
+    }
+
     /* Flush pending ICE candidates that arrived before remote SDP description */
     for (size_t i = 0; i < t->pending_candidate_count; i++) {
-        /* Process queued remote candidate */
-        (void)t->pending_candidates[i];
+        if (t->config.enable_libdatachannel && t->backend_ctx) {
+            ldc_backend_add_candidate((ldc_backend_t *)t->backend_ctx,
+                                      t->pending_candidates[i].candidate,
+                                      t->pending_candidates[i].mid);
+        }
     }
     t->pending_candidate_count = 0;
 
-    /* Transition to connected once negotiation completes */
-    set_state(t, WEBRTC_STATE_CONNECTED);
+    if (!t->config.enable_libdatachannel) {
+        set_state(t, WEBRTC_STATE_CONNECTED);
+    }
 
     pthread_mutex_unlock(&t->lock);
     return 0;
@@ -160,7 +212,9 @@ int webrtc_transport_add_remote_candidate(webrtc_transport_t *t, const char *can
             return -1; /* Queue overflow */
         }
     } else {
-        /* Apply candidate immediately */
+        if (t->config.enable_libdatachannel && t->backend_ctx) {
+            ldc_backend_add_candidate((ldc_backend_t *)t->backend_ctx, candidate, mid);
+        }
     }
 
     pthread_mutex_unlock(&t->lock);
@@ -177,8 +231,14 @@ int webrtc_transport_send_rtp(webrtc_transport_t *t, const uint8_t *packet, size
         pthread_mutex_unlock(&t->lock);
         return -1;
     }
-    pthread_mutex_unlock(&t->lock);
 
+    if (t->config.enable_libdatachannel && t->backend_ctx) {
+        int ret = ldc_backend_send_rtp((ldc_backend_t *)t->backend_ctx, packet, size);
+        pthread_mutex_unlock(&t->lock);
+        return ret;
+    }
+
+    pthread_mutex_unlock(&t->lock);
     return 0;
 }
 

@@ -27,6 +27,9 @@ static void on_state_changed(void *user, webrtc_state_t state) {
 }
 
 static void test_transport_lifecycle(void) {
+    g_on_local_desc_called = false;
+    g_on_local_cand_called = false;
+
     webrtc_transport_callbacks_t callbacks = {
         .on_local_description = on_local_description,
         .on_local_candidate = on_local_candidate,
@@ -67,9 +70,47 @@ static void test_transport_lifecycle(void) {
     printf("test_transport_lifecycle passed!\n");
 }
 
+static void test_libdatachannel_backend_dispatch(void) {
+    g_on_local_desc_called = false;
+    g_on_local_cand_called = false;
+
+    webrtc_transport_callbacks_t callbacks = {
+        .on_local_description = on_local_description,
+        .on_local_candidate = on_local_candidate,
+        .on_state_changed = on_state_changed
+    };
+
+    webrtc_transport_config_t config = {
+        .enable_libdatachannel = true
+    };
+    webrtc_transport_t *transport = NULL;
+
+    int ret = webrtc_transport_create(&config, &callbacks, NULL, &transport);
+    assert(ret == 0);
+    assert(transport != NULL);
+
+    ret = webrtc_transport_create_offer(transport);
+    assert(ret == 0);
+    assert(g_on_local_desc_called);
+    assert(g_on_local_cand_called);
+
+    const char *mock_answer = "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n";
+    ret = webrtc_transport_set_remote_description(transport, "answer", mock_answer);
+    assert(ret == 0);
+    assert(g_last_state == WEBRTC_STATE_CONNECTED);
+
+    uint8_t dummy_rtp[20] = {0x80, 0x60, 0x00, 0x01};
+    ret = webrtc_transport_send_rtp(transport, dummy_rtp, sizeof(dummy_rtp));
+    assert(ret == 0);
+
+    webrtc_transport_destroy(transport);
+    printf("test_libdatachannel_backend_dispatch passed!\n");
+}
+
 int main(void) {
     printf("Running webrtc_transport tests...\n");
     test_transport_lifecycle();
+    test_libdatachannel_backend_dispatch();
     printf("All webrtc_transport tests passed successfully.\n");
     return 0;
 }
