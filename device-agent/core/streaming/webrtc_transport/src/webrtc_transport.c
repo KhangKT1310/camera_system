@@ -27,6 +27,7 @@ struct webrtc_transport {
     /* Backend context handle for libdatachannel or mock engine */
     void *backend_ctx;
     atomic_int active_callers;
+    atomic_int ref_count;
 };
 
 static void set_state(webrtc_transport_t *t, webrtc_state_t new_state) {
@@ -105,6 +106,7 @@ int webrtc_transport_create(const webrtc_transport_config_t *config,
     t->has_remote_description = false;
     t->pending_candidate_count = 0;
     atomic_init(&t->active_callers, 0);
+    atomic_init(&t->ref_count, 1);
 
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
@@ -130,6 +132,34 @@ int webrtc_transport_create(const webrtc_transport_config_t *config,
     return 0;
 }
 
+webrtc_transport_t *webrtc_transport_retain(webrtc_transport_t *t) {
+    if (!t) return NULL;
+    atomic_fetch_add(&t->ref_count, 1);
+    return t;
+}
+
+void webrtc_transport_release(webrtc_transport_t *t) {
+    if (!t) return;
+    if (atomic_fetch_sub(&t->ref_count, 1) == 1) {
+        pthread_mutex_lock(&t->lock);
+        ldc_backend_t *b = (ldc_backend_t *)t->backend_ctx;
+        t->backend_ctx = NULL;
+        pthread_mutex_unlock(&t->lock);
+
+        while (atomic_load(&t->active_callers) > 0) {
+            struct timespec ts = { .tv_sec = 0, .tv_nsec = 1000000 };
+            nanosleep(&ts, NULL);
+        }
+
+        if (b) {
+            ldc_backend_destroy(b);
+        }
+
+        pthread_mutex_destroy(&t->lock);
+        free(t);
+    }
+}
+
 void webrtc_transport_destroy(webrtc_transport_t *t) {
     if (!t) {
         return;
@@ -137,23 +167,9 @@ void webrtc_transport_destroy(webrtc_transport_t *t) {
 
     pthread_mutex_lock(&t->lock);
     set_state(t, WEBRTC_STATE_CLOSED);
-
-    ldc_backend_t *b = (ldc_backend_t *)t->backend_ctx;
-    t->backend_ctx = NULL;
     pthread_mutex_unlock(&t->lock);
 
-    /* Wait for concurrent active callers to exit backend adapter call */
-    while (atomic_load(&t->active_callers) > 0) {
-        struct timespec ts = { .tv_sec = 0, .tv_nsec = 1000000 }; /* 1ms sleep */
-        nanosleep(&ts, NULL);
-    }
-
-    if (b) {
-        ldc_backend_destroy(b);
-    }
-
-    pthread_mutex_destroy(&t->lock);
-    free(t);
+    webrtc_transport_release(t);
 }
 
 int webrtc_transport_create_offer(webrtc_transport_t *t) {
@@ -161,7 +177,14 @@ int webrtc_transport_create_offer(webrtc_transport_t *t) {
         return -1;
     }
 
+    webrtc_transport_retain(t);
+
     pthread_mutex_lock(&t->lock);
+    if (t->state == WEBRTC_STATE_CLOSED) {
+        pthread_mutex_unlock(&t->lock);
+        webrtc_transport_release(t);
+        return -1;
+    }
     set_state(t, WEBRTC_STATE_CREATING);
     set_state(t, WEBRTC_STATE_NEGOTIATING);
     pthread_mutex_unlock(&t->lock);
@@ -170,6 +193,7 @@ int webrtc_transport_create_offer(webrtc_transport_t *t) {
     if (b) {
         int ret = ldc_backend_create_offer(b);
         release_backend(t);
+        webrtc_transport_release(t);
         return ret;
     }
 
@@ -194,6 +218,7 @@ int webrtc_transport_create_offer(webrtc_transport_t *t) {
     }
     pthread_mutex_unlock(&t->lock);
 
+    webrtc_transport_release(t);
     return 0;
 }
 
@@ -202,7 +227,14 @@ int webrtc_transport_set_remote_description(webrtc_transport_t *t, const char *t
         return -1;
     }
 
+    webrtc_transport_retain(t);
+
     pthread_mutex_lock(&t->lock);
+    if (t->state == WEBRTC_STATE_CLOSED) {
+        pthread_mutex_unlock(&t->lock);
+        webrtc_transport_release(t);
+        return -1;
+    }
     t->has_remote_description = true;
     set_state(t, WEBRTC_STATE_CONNECTING);
 
@@ -227,6 +259,7 @@ int webrtc_transport_set_remote_description(webrtc_transport_t *t, const char *t
         pthread_mutex_unlock(&t->lock);
     }
 
+    webrtc_transport_release(t);
     return 0;
 }
 
@@ -235,7 +268,15 @@ int webrtc_transport_add_remote_candidate(webrtc_transport_t *t, const char *can
         return -1;
     }
 
+    webrtc_transport_retain(t);
+
     pthread_mutex_lock(&t->lock);
+    if (t->state == WEBRTC_STATE_CLOSED) {
+        pthread_mutex_unlock(&t->lock);
+        webrtc_transport_release(t);
+        return -1;
+    }
+
     if (!t->has_remote_description) {
         /* Queue candidate if remote description is not yet set */
         if (t->pending_candidate_count < WEBRTC_MAX_PENDING_CANDIDATES) {
@@ -247,9 +288,11 @@ int webrtc_transport_add_remote_candidate(webrtc_transport_t *t, const char *can
             }
             t->pending_candidate_count++;
             pthread_mutex_unlock(&t->lock);
+            webrtc_transport_release(t);
             return 0;
         } else {
             pthread_mutex_unlock(&t->lock);
+            webrtc_transport_release(t);
             return -1; /* Queue overflow */
         }
     }
@@ -261,6 +304,7 @@ int webrtc_transport_add_remote_candidate(webrtc_transport_t *t, const char *can
         release_backend(t);
     }
 
+    webrtc_transport_release(t);
     return 0;
 }
 
@@ -269,9 +313,12 @@ int webrtc_transport_send_rtp(webrtc_transport_t *t, const uint8_t *packet, size
         return -1;
     }
 
+    webrtc_transport_retain(t);
+
     pthread_mutex_lock(&t->lock);
     if (t->state != WEBRTC_STATE_CONNECTED && t->state != WEBRTC_STATE_CONNECTING) {
         pthread_mutex_unlock(&t->lock);
+        webrtc_transport_release(t);
         return -1;
     }
     pthread_mutex_unlock(&t->lock);
@@ -280,9 +327,11 @@ int webrtc_transport_send_rtp(webrtc_transport_t *t, const uint8_t *packet, size
     if (b) {
         int ret = ldc_backend_send_rtp(b, packet, size);
         release_backend(t);
+        webrtc_transport_release(t);
         return ret;
     }
 
+    webrtc_transport_release(t);
     return 0;
 }
 

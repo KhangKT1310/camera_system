@@ -54,7 +54,20 @@ int webrtc_transport_create(const webrtc_transport_config_t *config,
                            webrtc_transport_t **out_transport);
 
 /**
- * @brief Destroys a WebRTC transport instance and frees resources.
+ * @brief Retains a reference to a WebRTC transport instance.
+ * @param transport Handle to transport.
+ * @return Retained transport pointer.
+ */
+webrtc_transport_t *webrtc_transport_retain(webrtc_transport_t *transport);
+
+/**
+ * @brief Releases a reference from a WebRTC transport instance. Frees memory when refcount hits 0.
+ * @param transport Handle to transport.
+ */
+void webrtc_transport_release(webrtc_transport_t *transport);
+
+/**
+ * @brief Destroys a WebRTC transport instance (marks CLOSED and releases creation reference).
  * @param transport Handle to transport.
  */
 void webrtc_transport_destroy(webrtc_transport_t *transport);
