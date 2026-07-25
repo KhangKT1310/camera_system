@@ -68,12 +68,15 @@ int session_event_queue_push(session_event_queue_t *q, const session_event_t *ev
             pthread_mutex_unlock(&q->lock);
             return 0; /* Coalesced */
         }
-        q->keyframe_request_pending = true;
     }
 
     if (q->count >= SESSION_EVENT_QUEUE_CAPACITY) {
         pthread_mutex_unlock(&q->lock);
         return -1; /* Queue overflow for critical events */
+    }
+
+    if (evt->type == SESSION_EVENT_KEYFRAME_REQUESTED) {
+        q->keyframe_request_pending = true;
     }
 
     q->ring[q->tail] = *evt;
