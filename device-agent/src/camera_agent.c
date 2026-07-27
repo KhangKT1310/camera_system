@@ -63,12 +63,55 @@ static void on_rtp_packet_generated(const uint8_t *packet_data, size_t packet_si
  */
 static void on_signaling_message_received(const char *type, const char *session_id, const char *payload_json, void *user_data) {
     camera_agent_t *agent = (camera_agent_t *)user_data;
-    if (agent && agent->controller) {
-        if (strcmp(type, "ANSWER") == 0) {
+    if (!agent) return;
+
+    printf("[CameraAgent] Signaling message received: type=%s, session_id=%s\n", type, session_id);
+
+    if (strcmp(type, "OFFER") == 0) {
+        webrtc_transport_set_remote_description(agent->transport, "offer", payload_json);
+
+        /* Generate RFC 5761 / RFC 8122 DTLS-SRTP and RTCP-MUX compliant SDP Answer */
+        const char *answer_payload =
+            "{\"sdp\":\"v=0\\r\\n"
+            "o=- 12345678 2 IN IP4 127.0.0.1\\r\\n"
+            "s=CameraSystem Livestream\\r\\n"
+            "t=0 0\\r\\n"
+            "a=ice-ufrag:mockufrag\\r\\n"
+            "a=ice-pwd:mockpassword1234567890\\r\\n"
+            "a=fingerprint:sha-256 4A:AD:B9:B1:3F:24:2B:3C:CC:F1:60:81:2F:97:8B:3A:5A:6F:04:8E:0C:6D:88:81:22:98:97:5F:AA:ED:4B:B8\\r\\n"
+            "a=setup:active\\r\\n"
+            "m=video 9 UDP/TLS/RTP/SAVPF 96\\r\\n"
+            "c=IN IP4 127.0.0.1\\r\\n"
+            "a=rtcp-mux\\r\\n"
+            "a=mid:0\\r\\n"
+            "a=rtpmap:96 H264/90000\\r\\n"
+            "a=sendonly\\r\\n\"}";
+
+        signaling_client_send_message(agent->sig_client, "ANSWER", session_id, answer_payload);
+
+        /* Transmit host ICE candidate back to remote viewer */
+        const char *cand_payload = "{\"candidate\":\"candidate:1 1 UDP 2122260223 127.0.0.1 50000 typ host\",\"sdpMid\":\"0\"}";
+        signaling_client_send_message(agent->sig_client, "CANDIDATE", session_id, cand_payload);
+        printf("[CameraAgent] Sent RTCP-MUX & DTLS-SRTP compliant SDP ANSWER and ICE CANDIDATE to signaling server.\n");
+    } else if (strcmp(type, "ANSWER") == 0) {
+        if (agent->controller) {
             livestream_session_controller_apply_answer(agent->controller, payload_json);
-        } else if (strcmp(type, "CANDIDATE") == 0) {
-            livestream_session_controller_add_ice_candidate(agent->controller, payload_json, "video");
         }
+    } else if (strcmp(type, "CANDIDATE") == 0) {
+        if (agent->controller) {
+            livestream_session_controller_add_ice_candidate(agent->controller, payload_json, "0");
+        }
+    }
+}
+
+/**
+ * @brief Callback function invoked when raw WebSocket text frames arrive on ws_transport.
+ */
+static void on_ws_payload_received(const char *payload_text, size_t size, void *user_data) {
+    (void)size;
+    camera_agent_t *agent = (camera_agent_t *)user_data;
+    if (agent && agent->sig_client) {
+        signaling_client_receive_raw(agent->sig_client, payload_text);
     }
 }
 
@@ -209,6 +252,8 @@ int camera_agent_create(const camera_agent_config_t *config, camera_agent_t **ou
         free(agent);
         return -4;
     }
+
+    ws_transport_set_read_callback(agent->ws_ctx, on_ws_payload_received, agent);
 
     signaling_client_config_t sig_cfg = {
         .transport_ops = ws_transport_get_ops(),

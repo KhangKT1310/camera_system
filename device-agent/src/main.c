@@ -7,12 +7,14 @@
 
 #include "camera_agent.h"
 #include <signal.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 static camera_agent_t *g_agent = NULL;
+static volatile sig_atomic_t g_running = 1;
 
 /**
  * @brief Signal handler for SIGINT and SIGTERM.
@@ -22,10 +24,8 @@ static camera_agent_t *g_agent = NULL;
  * @param[in] sig Received signal number.
  */
 static void handle_signal(int sig) {
-    printf("\n[Main] Received signal %d, initiating daemon shutdown...\n", sig);
-    if (g_agent) {
-        camera_agent_stop(g_agent);
-    }
+    (void)sig;
+    g_running = 0;
 }
 
 /**
@@ -105,10 +105,11 @@ int main(int argc, char **argv) {
     printf("[Main] Camera Agent daemon is running. Press Ctrl+C to terminate.\n");
 
     /* Daemon execution loop */
-    while (g_agent) {
-        sleep(1);
+    while (g_running) {
+        usleep(100000); // 100ms sleep
     }
 
+    printf("\n[Main] Received shutdown signal, terminating daemon cleanly...\n");
     camera_agent_destroy(g_agent);
     printf("[Main] Daemon terminated cleanly.\n");
     return 0;

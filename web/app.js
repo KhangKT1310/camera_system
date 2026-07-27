@@ -6,6 +6,7 @@ class WebRtcViewer {
     this.ws = null;
     this.pc = null;
     this.statsInterval = null;
+    this.pendingCandidates = [];
 
     // DOM Elements
     this.remoteVideo = document.getElementById('remoteVideo');
@@ -103,6 +104,7 @@ class WebRtcViewer {
   }
 
   createPeerConnection(sessionId) {
+    this.pendingCandidates = [];
     const rtcConfig = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' }
@@ -168,25 +170,82 @@ class WebRtcViewer {
     this.log(`Received Signaling: ${type}`);
 
     if (type === 'ANSWER') {
-      const remoteSdp = typeof payload === 'string' ? JSON.parse(payload).sdp : payload.sdp;
-      await this.pc.setRemoteDescription(new RTCSessionDescription({
-        type: 'answer',
-        sdp: remoteSdp
-      }));
-      this.log('Remote SDP Answer applied successfully');
+      let remoteSdp = payload;
+      if (typeof payload === 'string') {
+        try {
+          const parsed = JSON.parse(payload);
+          remoteSdp = parsed.sdp || payload;
+        } catch(e) {
+          remoteSdp = payload;
+        }
+      } else if (payload && payload.sdp) {
+        remoteSdp = payload.sdp;
+      }
+
+      try {
+        await this.pc.setRemoteDescription(new RTCSessionDescription({
+          type: 'answer',
+          sdp: remoteSdp
+        }));
+        this.log('Remote SDP Answer applied successfully');
+        this.updateBadge('connected', 'SIGNALING COMPLETE');
+        this.overlayStatus.textContent = 'Signaling Negotiation Complete';
+        this.spinner.style.display = 'none';
+
+        // Flush queued candidates once remote description is set
+        for (const cand of this.pendingCandidates) {
+          try {
+            await this.pc.addIceCandidate(new RTCIceCandidate(cand));
+            this.log('Queued ICE Candidate added successfully');
+          } catch (e) {
+            this.log(`Candidate note: ${e.message}`);
+          }
+        }
+        this.pendingCandidates = [];
+      } catch(err) {
+        this.log(`SDP Answer Error: ${err.message}`);
+      }
+
     } else if (type === 'OFFER') {
-      const remoteSdp = typeof payload === 'string' ? JSON.parse(payload).sdp : payload.sdp;
-      await this.pc.setRemoteDescription(new RTCSessionDescription({
-        type: 'offer',
-        sdp: remoteSdp
-      }));
-      const answer = await this.pc.createAnswer();
-      await this.pc.setLocalDescription(answer);
-      this.sendEnvelope('ANSWER', envelope.session_id, { sdp: answer.sdp });
+      let remoteSdp = payload;
+      if (typeof payload === 'string') {
+        try {
+          const parsed = JSON.parse(payload);
+          remoteSdp = parsed.sdp || payload;
+        } catch(e) {}
+      } else if (payload && payload.sdp) {
+        remoteSdp = payload.sdp;
+      }
+
+      try {
+        await this.pc.setRemoteDescription(new RTCSessionDescription({
+          type: 'offer',
+          sdp: remoteSdp
+        }));
+        const answer = await this.pc.createAnswer();
+        await this.pc.setLocalDescription(answer);
+        this.sendEnvelope('ANSWER', envelope.session_id, { sdp: answer.sdp });
+      } catch(err) {
+        this.log(`SDP Offer Error: ${err.message}`);
+      }
+
     } else if (type === 'CANDIDATE') {
-      const candObj = typeof payload === 'string' ? JSON.parse(payload) : payload;
+      let candObj = payload;
+      if (typeof payload === 'string') {
+        try { candObj = JSON.parse(payload); } catch(e) {}
+      }
       if (candObj && candObj.candidate) {
-        await this.pc.addIceCandidate(new RTCIceCandidate(candObj));
+        if (!this.pc || !this.pc.remoteDescription) {
+          this.pendingCandidates.push(candObj);
+          this.log('ICE Candidate queued until remote description is set');
+        } else {
+          try {
+            await this.pc.addIceCandidate(new RTCIceCandidate(candObj));
+            this.log('ICE Candidate added successfully');
+          } catch(e) {
+            this.log(`Candidate note: ${e.message}`);
+          }
+        }
       }
     }
   }

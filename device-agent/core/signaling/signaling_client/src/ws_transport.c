@@ -1,7 +1,14 @@
+/**
+ * @file ws_transport.c
+ * @brief POSIX C17 WebSocket Client Transport Implementation with Background Reader.
+ */
+
 #include "ws_transport.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netdb.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,7 +20,13 @@ struct ws_transport_ctx {
     char host[128];
     int port;
     char path[256];
-    bool is_connected;
+    atomic_bool is_connected;
+
+    ws_transport_read_cb read_cb;
+    void *read_user_data;
+
+    pthread_t reader_thread;
+    atomic_bool reader_running;
 };
 
 static int parse_ws_uri(const char *uri, char *host, size_t host_len, int *port, char *path, size_t path_len) {
@@ -56,6 +69,65 @@ static int parse_ws_uri(const char *uri, char *host, size_t host_len, int *port,
     }
 
     return 0;
+}
+
+/**
+ * @brief Background reader thread decoding incoming RFC 6455 WebSocket text frames.
+ */
+static void *ws_reader_worker(void *arg) {
+    ws_transport_ctx_t *ctx = (ws_transport_ctx_t *)arg;
+    if (!ctx) return NULL;
+
+    uint8_t buffer[65536];
+
+    while (atomic_load(&ctx->reader_running) && atomic_load(&ctx->is_connected)) {
+        ssize_t n = read(ctx->sockfd, buffer, sizeof(buffer) - 1);
+        if (n <= 0) {
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                usleep(10000);
+                continue;
+            }
+            break;
+        }
+
+        buffer[n] = '\0';
+        uint8_t opcode = buffer[0] & 0x0F;
+
+        if (opcode == 0x1) { /* Text Frame */
+            size_t payload_len = buffer[1] & 0x7F;
+            size_t offset = 2;
+            if (payload_len == 126) {
+                payload_len = ((size_t)buffer[2] << 8) | buffer[3];
+                offset += 2;
+            } else if (payload_len == 127) {
+                offset += 8;
+            }
+
+            bool masked = (buffer[1] & 0x80) != 0;
+            uint8_t masks[4] = {0};
+            if (masked) {
+                memcpy(masks, &buffer[offset], 4);
+                offset += 4;
+            }
+
+            if (offset + payload_len <= (size_t)n) {
+                char *payload = (char *)malloc(payload_len + 1);
+                if (payload) {
+                    for (size_t i = 0; i < payload_len; i++) {
+                        payload[i] = masked ? (char)(buffer[offset + i] ^ masks[i % 4]) : (char)buffer[offset + i];
+                    }
+                    payload[payload_len] = '\0';
+
+                    if (ctx->read_cb) {
+                        ctx->read_cb(payload, payload_len, ctx->read_user_data);
+                    }
+                    free(payload);
+                }
+            }
+        }
+    }
+
+    return NULL;
 }
 
 static int ws_connect_impl(void *ctx_ptr, const char *uri) {
@@ -118,13 +190,17 @@ static int ws_connect_impl(void *ctx_ptr, const char *uri) {
         return -1; /* Failed HTTP 101 WebSocket Upgrade */
     }
 
-    ctx->is_connected = true;
+    atomic_store(&ctx->is_connected, true);
+    atomic_store(&ctx->reader_running, true);
+
+    pthread_create(&ctx->reader_thread, NULL, ws_reader_worker, ctx);
+
     return 0;
 }
 
 static int ws_send_impl(void *ctx_ptr, const void *data, size_t size) {
     ws_transport_ctx_t *ctx = (ws_transport_ctx_t *)ctx_ptr;
-    if (!ctx || ctx->sockfd < 0 || !ctx->is_connected || !data || size == 0) {
+    if (!ctx || ctx->sockfd < 0 || !atomic_load(&ctx->is_connected) || !data || size == 0) {
         return -1;
     }
 
@@ -173,11 +249,19 @@ static int ws_close_impl(void *ctx_ptr) {
     ws_transport_ctx_t *ctx = (ws_transport_ctx_t *)ctx_ptr;
     if (!ctx) return -1;
 
-    if (ctx->sockfd >= 0) {
-        close(ctx->sockfd);
-        ctx->sockfd = -1;
+    if (atomic_load(&ctx->is_connected)) {
+        atomic_store(&ctx->is_connected, false);
+        atomic_store(&ctx->reader_running, false);
+
+        if (ctx->sockfd >= 0) {
+            shutdown(ctx->sockfd, SHUT_RDWR);
+            close(ctx->sockfd);
+            ctx->sockfd = -1;
+        }
+
+        pthread_join(ctx->reader_thread, NULL);
     }
-    ctx->is_connected = false;
+
     return 0;
 }
 
@@ -188,7 +272,8 @@ int ws_transport_create(const char *uri, ws_transport_ctx_t **out_ctx) {
     if (!ctx) return -1;
 
     ctx->sockfd = -1;
-    ctx->is_connected = false;
+    atomic_init(&ctx->is_connected, false);
+    atomic_init(&ctx->reader_running, false);
 
     if (uri) {
         parse_ws_uri(uri, ctx->host, sizeof(ctx->host), &ctx->port, ctx->path, sizeof(ctx->path));
@@ -196,6 +281,13 @@ int ws_transport_create(const char *uri, ws_transport_ctx_t **out_ctx) {
 
     *out_ctx = ctx;
     return 0;
+}
+
+void ws_transport_set_read_callback(ws_transport_ctx_t *ctx, ws_transport_read_cb callback, void *user_data) {
+    if (ctx) {
+        ctx->read_cb = callback;
+        ctx->read_user_data = user_data;
+    }
 }
 
 void ws_transport_destroy(ws_transport_ctx_t *ctx) {

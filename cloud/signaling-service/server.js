@@ -1,6 +1,6 @@
 /**
- * Dev Signaling Server (Node.js 0-dependency / WebSocket fallback)
- * Runs out-of-the-box with Node.js: `node server.js`
+ * Dev Signaling Server (Node.js 0-dependency / Pure Built-in Modules)
+ * Runs out-of-the-box anywhere without npm dependencies: `node server.js`
  */
 const http = require('http');
 const crypto = require('crypto');
@@ -10,11 +10,11 @@ const PORT = process.env.PORT || 8080;
 // session_id -> Set of socket clients
 const sessions = new Map();
 
-function parseQuery(url) {
+function parseQuery(urlStr) {
   const query = {};
-  const qIdx = url.indexOf('?');
+  const qIdx = urlStr.indexOf('?');
   if (qIdx === -1) return query;
-  const pairs = url.slice(qIdx + 1).split('&');
+  const pairs = urlStr.slice(qIdx + 1).split('&');
   for (const pair of pairs) {
     const [k, v] = pair.split('=');
     if (k) query[decodeURIComponent(k)] = decodeURIComponent(v || '');
@@ -37,7 +37,6 @@ server.on('upgrade', (req, socket, head) => {
   const role = query.role || 'viewer';
   const sessionId = query.session_id || 'stream1';
 
-  // WebSocket Handshake Key Accept
   const secKey = req.headers['sec-websocket-key'];
   if (!secKey) {
     socket.destroy();
@@ -59,7 +58,6 @@ server.on('upgrade', (req, socket, head) => {
 
   socket.write(headers.join('\r\n'));
 
-  // Store client metadata
   socket.role = role;
   socket.sessionId = sessionId;
 
@@ -70,29 +68,61 @@ server.on('upgrade', (req, socket, head) => {
 
   console.log(`[SignalingServer] Client connected: role=${role}, session_id=${sessionId}`);
 
-  // Raw frame parser
-  socket.on('data', (buf) => {
-    // Basic unmasking for incoming WebSocket text frames
-    const len = buf[1] & 0x7f;
-    let offset = 2;
-    if (len === 126) offset += 2;
-    else if (len === 127) offset += 8;
+  let rawBuffer = Buffer.alloc(0);
 
-    const masks = buf.slice(offset, offset + 4);
-    offset += 4;
+  socket.on('data', (chunk) => {
+    rawBuffer = Buffer.concat([rawBuffer, chunk]);
 
-    const payload = buf.slice(offset);
-    for (let i = 0; i < payload.length; i++) {
-      payload[i] ^= masks[i % 4];
-    }
+    while (rawBuffer.length >= 2) {
+      const opcode = rawBuffer[0] & 0x0f;
+      const isMasked = (rawBuffer[1] & 0x80) !== 0;
+      let payloadLen = rawBuffer[1] & 0x7f;
 
-    // Forward raw payload to other clients in same session_id
-    const room = sessions.get(sessionId);
-    if (room) {
-      for (const client of room) {
-        if (client !== socket && !client.destroyed) {
-          sendWsFrame(client, payload);
+      let headerLen = 2;
+      if (payloadLen === 126) {
+        if (rawBuffer.length < 4) break;
+        payloadLen = rawBuffer.readUInt16BE(2);
+        headerLen = 4;
+      } else if (payloadLen === 127) {
+        if (rawBuffer.length < 10) break;
+        payloadLen = Number(rawBuffer.readBigUInt64BE(2));
+        headerLen = 10;
+      }
+
+      const maskLen = isMasked ? 4 : 0;
+      const totalFrameLen = headerLen + maskLen + payloadLen;
+
+      if (rawBuffer.length < totalFrameLen) {
+        break; // Wait for full WebSocket frame chunk
+      }
+
+      const frameData = rawBuffer.slice(0, totalFrameLen);
+      rawBuffer = rawBuffer.slice(totalFrameLen);
+
+      let payload = frameData.slice(headerLen + maskLen);
+      if (isMasked) {
+        const maskKey = frameData.slice(headerLen, headerLen + 4);
+        payload = Buffer.from(payload);
+        for (let i = 0; i < payload.length; i++) {
+          payload[i] ^= maskKey[i % 4];
         }
+      }
+
+      if (opcode === 0x1 || opcode === 0x2) { // Text or Binary frame
+        const msgStr = payload.toString('utf8');
+        console.log(`[SignalingServer] Received from role=${role}, session_id=${sessionId}: ${msgStr.slice(0, 80)}...`);
+
+        const room = sessions.get(sessionId);
+        if (room) {
+          for (const client of room) {
+            if (client !== socket && !client.destroyed) {
+              sendWsFrame(client, payload);
+              console.log(`[SignalingServer] Forwarded message to client role=${client.role}`);
+            }
+          }
+        }
+      } else if (opcode === 0x8) { // Close frame
+        socket.end();
       }
     }
   });
@@ -131,5 +161,5 @@ function sendWsFrame(socket, payload) {
 }
 
 server.listen(PORT, () => {
-  console.log(`[SignalingServer] Starting Dev Signaling Server on ws://localhost:${PORT}/ws`);
+  console.log(`[SignalingServer] Starting 0-dependency Dev Signaling Server on ws://localhost:${PORT}/ws`);
 });
